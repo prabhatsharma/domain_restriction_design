@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenObserve - SSO Domain Restrictions</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+            line-height: 1.5;
+        }
+        
+        .app-container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid #e1e5e9;
+        }
+        
+        .header h1 {
+            margin: 0 0 8px 0;
+            color: #1a1a1a;
+            font-size: 24px;
+        }
+        
+        .header p {
+            margin: 0;
+            color: #6b7280;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div class="app-container">
+            <div class="header">
+                <h1>OpenObserve Settings</h1>
+                <p>Configure authentication and access control</p>
+            </div>
+            
+            <domain-restriction-settings></domain-restriction-settings>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, computed, onMounted } = Vue;
+
+        // Domain Restriction Settings Component
+        const DomainRestrictionSettings = {
+            template: `
+                <div class="domain-restriction-settings">
+                    <div class="settings-header">
+                        <h3>SSO Domain Restrictions</h3>
+                        <p class="settings-description">
+                            Control which domains and specific users are allowed to login using SSO providers
+                        </p>
+                    </div>
+
+                    <div class="auth-provider-section">
+
+                        <div v-if="isProviderEnabled" class="restriction-controls">
+                            <div class="domain-management">
+                                <div class="domain-input-section">
+                                    <label class="input-label">Domain and allowed users</label>
+                                    <div class="domain-input-group">
+                                        <input 
+                                            type="text" 
+                                            v-model="newDomain"
+                                            placeholder="e.g. example.com"
+                                            class="domain-input"
+                                            @keyup.enter="addDomain"
+                                        />
+                                        <button 
+                                            @click="addDomain" 
+                                            :disabled="!isValidDomain"
+                                            class="add-button"
+                                        >
+                                            Add Domain
+                                        </button>
+                                    </div>
+                                    <p class="input-hint">Enter domain names without the @ symbol</p>
+                                </div>
+
+                                <div v-if="allowedDomains.length > 0" class="domains-list">
+                                    <div class="list-header">
+                                        <span>{{ allowedDomains.length }} domain(s) configured</span>
+                                    </div>
+                                    <div class="domain-items">
+                                        <div 
+                                            v-for="domain in allowedDomains" 
+                                            :key="domain"
+                                            class="domain-config-item"
+                                        >
+                                            <div class="domain-header">
+                                                <span class="domain-name">{{ domain }}</span>
+                                                <button 
+                                                    @click="removeDomain(domain)"
+                                                    class="remove-button"
+                                                    title="Remove domain"
+                                                >
+                                                    ×
+                                                </button>
+                                            </div>
+                                            
+                                            <div class="access-control">
+                                                <div class="domain-radio-group">
+                                                    <label class="domain-radio-option">
+                                                        <input 
+                                                            type="radio" 
+                                                            :name="'access-' + domain"
+                                                            v-model="domainAccessMode[domain]" 
+                                                            value="allow-all"
+                                                        />
+                                                        <span class="radio-text">Allow all users from {{ domain }}</span>
+                                                    </label>
+
+                                                    <label class="domain-radio-option">
+                                                        <input 
+                                                            type="radio" 
+                                                            :name="'access-' + domain"
+                                                            v-model="domainAccessMode[domain]" 
+                                                            value="specific-users"
+                                                        />
+                                                        <span class="radio-text">Allow only specific users from {{ domain }}</span>
+                                                    </label>
+                                                </div>
+                                                
+                                                <div v-if="domainAccessMode[domain] === 'specific-users'" class="email-management">
+                                                    <div class="email-input-group">
+                                                        <input 
+                                                            type="email" 
+                                                            v-model="newEmails[domain]"
+                                                            :placeholder="'e.g. user@' + domain"
+                                                            class="email-input"
+                                                            @keyup.enter="addEmail(domain)"
+                                                        />
+                                                        <button 
+                                                            @click="addEmail(domain)" 
+                                                            :disabled="!isValidEmail(domain)"
+                                                            class="add-email-button"
+                                                        >
+                                                            Add Email
+                                                        </button>
+                                                    </div>
+                                                    
+                                                    <div v-if="domainEmails[domain] && domainEmails[domain].length > 0" class="emails-list">
+                                                        <div class="email-items">
+                                                            <div 
+                                                                v-for="email in domainEmails[domain]" 
+                                                                :key="email"
+                                                                class="email-item"
+                                                            >
+                                                                <span class="email-address">{{ email }}</span>
+                                                                <button 
+                                                                    @click="removeEmail(domain, email)"
+                                                                    class="remove-email-button"
+                                                                    title="Remove email"
+                                                                >
+                                                                    ×
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <div v-else class="no-emails">
+                                                        <p>No specific users configured. Add email addresses above.</p>
+                                                    </div>
+                                                </div>
+                                                
+                                                <div v-else-if="domainAccessMode[domain] === 'allow-all'" class="allow-all-notice">
+                                                    <p>All users with email addresses ending in @{{ domain }} will be allowed to login.</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div v-else class="empty-state">
+                                    <p>No domains configured. Add domains above to restrict access.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="actions">
+                        <button @click="saveSettings" class="save-button" :disabled="!hasChanges">
+                            Save Changes
+                        </button>
+                        <button @click="resetSettings" class="cancel-button">
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            `,
+            setup() {
+                // Reactive data
+                const allowedDomains = ref([]);
+                const newDomain = ref('');
+                const newEmails = ref({});
+                const domainEmails = ref({});
+                const domainAccessMode = ref({});
+                const isProviderEnabled = ref(true);
+                const originalSettings = ref({});
+
+                // Computed properties
+                const isValidDomain = computed(() => {
+                    const domain = newDomain.value.trim();
+                    const domainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+                    return domain && domainRegex.test(domain) && !allowedDomains.value.includes(domain);
+                });
+
+                const isValidEmail = (domain) => {
+                    const email = newEmails.value[domain];
+                    if (!email) return false;
+                    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                    const emailDomain = email.split('@')[1];
+                    return emailRegex.test(email) && emailDomain === domain && 
+                           (!domainEmails.value[domain] || !domainEmails.value[domain].includes(email));
+                };
+
+                const hasChanges = computed(() => {
+                    return JSON.stringify({
+                        allowedDomains: allowedDomains.value,
+                        domainEmails: domainEmails.value,
+                        domainAccessMode: domainAccessMode.value
+                    }) !== JSON.stringify(originalSettings.value);
+                });
+
+                // Methods
+                const addDomain = () => {
+                    if (isValidDomain.value) {
+                        const domain = newDomain.value.trim().toLowerCase();
+                        allowedDomains.value.push(domain);
+                        newEmails.value[domain] = '';
+                        domainEmails.value[domain] = [];
+                        domainAccessMode.value[domain] = 'allow-all';
+                        newDomain.value = '';
+                    }
+                };
+
+                const removeDomain = (domain) => {
+                    const index = allowedDomains.value.indexOf(domain);
+                    if (index > -1) {
+                        allowedDomains.value.splice(index, 1);
+                        delete newEmails.value[domain];
+                        delete domainEmails.value[domain];
+                        delete domainAccessMode.value[domain];
+                    }
+                };
+
+                const addEmail = (domain) => {
+                    if (isValidEmail(domain)) {
+                        if (!domainEmails.value[domain]) {
+                            domainEmails.value[domain] = [];
+                        }
+                        domainEmails.value[domain].push(newEmails.value[domain]);
+                        newEmails.value[domain] = '';
+                    }
+                };
+
+                const removeEmail = (domain, email) => {
+                    if (domainEmails.value[domain]) {
+                        const index = domainEmails.value[domain].indexOf(email);
+                        if (index > -1) {
+                            domainEmails.value[domain].splice(index, 1);
+                        }
+                    }
+                };
+
+                const saveSettings = () => {
+                    console.log('Saving settings:', {
+                        allowedDomains: allowedDomains.value,
+                        domainEmails: domainEmails.value,
+                        domainAccessMode: domainAccessMode.value
+                    });
+                    
+                    originalSettings.value = {
+                        allowedDomains: [...allowedDomains.value],
+                        domainEmails: { ...domainEmails.value },
+                        domainAccessMode: { ...domainAccessMode.value }
+                    };
+                    
+                    alert('Domain restriction settings saved successfully!');
+                };
+
+                const resetSettings = () => {
+                    allowedDomains.value = [...(originalSettings.value.allowedDomains || [])];
+                    domainEmails.value = { ...(originalSettings.value.domainEmails || {}) };
+                    domainAccessMode.value = { ...(originalSettings.value.domainAccessMode || {}) };
+                    newDomain.value = '';
+                    newEmails.value = {};
+                };
+
+                // Load initial settings
+                onMounted(() => {
+                    const initialSettings = {
+                        allowedDomains: [],
+                        domainEmails: {},
+                        domainAccessMode: {}
+                    };
+                    
+                    allowedDomains.value = initialSettings.allowedDomains;
+                    domainEmails.value = initialSettings.domainEmails;
+                    domainAccessMode.value = initialSettings.domainAccessMode;
+                    originalSettings.value = { ...initialSettings };
+                });
+
+                return {
+                    allowedDomains,
+                    newDomain,
+                    newEmails,
+                    domainEmails,
+                    domainAccessMode,
+                    isProviderEnabled,
+                    originalSettings,
+                    isValidDomain,
+                    isValidEmail,
+                    hasChanges,
+                    addDomain,
+                    removeDomain,
+                    addEmail,
+                    removeEmail,
+                    saveSettings,
+                    resetSettings
+                };
+            }
+        };
+
+        // Create Vue app
+        createApp({
+            components: {
+                'domain-restriction-settings': DomainRestrictionSettings
+            }
+        }).mount('#app');
+    </script>
+
+    <style>
+        .domain-restriction-settings {
+            max-width: 800px;
+            padding: 24px;
+            background: #fff;
+            border-radius: 8px;
+            border: 1px solid #e1e5e9;
+        }
+
+        .settings-header {
+            margin-bottom: 32px;
+        }
+
+        .settings-header h3 {
+            margin: 0 0 8px 0;
+            font-size: 20px;
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+
+        .settings-description {
+            margin: 0;
+            color: #6b7280;
+            font-size: 14px;
+        }
+
+        .auth-provider-section {
+            border: 1px solid #e1e5e9;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 24px;
+        }
+
+        .provider-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .provider-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .provider-icon {
+            font-size: 18px;
+        }
+
+        .provider-name {
+            font-weight: 500;
+            font-size: 16px;
+        }
+
+        .provider-status {
+            padding: 4px 12px;
+            border-radius: 16px;
+            font-size: 12px;
+            font-weight: 500;
+            background: #f3f4f6;
+            color: #6b7280;
+        }
+
+        .provider-status.active {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .radio-group {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .radio-option {
+            display: flex;
+            cursor: pointer;
+            padding: 16px;
+            border: 1px solid #e1e5e9;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+
+        .radio-option:hover {
+            border-color: #3b82f6;
+            background: #f8fafc;
+        }
+
+        .radio-label {
+            font-weight: 500;
+            color: #1a1a1a;
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .radio-description {
+            font-size: 14px;
+            color: #6b7280;
+        }
+
+        .domain-management {
+            border-top: 1px solid #e1e5e9;
+            padding-top: 20px;
+        }
+
+        .input-label {
+            display: block;
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: #1a1a1a;
+        }
+
+        .domain-input-group {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .domain-input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .domain-input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .add-button {
+            padding: 8px 16px;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .add-button:hover:not(:disabled) {
+            background: #2563eb;
+        }
+
+        .add-button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        .input-hint {
+            font-size: 12px;
+            color: #6b7280;
+            margin: 0;
+        }
+
+        .domains-list {
+            margin-top: 20px;
+        }
+
+        .list-header {
+            font-size: 14px;
+            font-weight: 500;
+            color: #1a1a1a;
+            margin-bottom: 12px;
+        }
+
+        .domain-items {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .domain-config-item {
+            border: 1px solid #e1e5e9;
+            border-radius: 6px;
+            background: #f8fafc;
+            margin-bottom: 16px;
+        }
+
+        .domain-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background: #f1f5f9;
+            border-bottom: 1px solid #e1e5e9;
+            font-weight: 500;
+        }
+
+        .access-control {
+            padding: 16px;
+        }
+
+        .domain-radio-group {
+            margin-bottom: 16px;
+        }
+
+        .domain-radio-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+            cursor: pointer;
+        }
+
+        .radio-text {
+            font-size: 14px;
+            color: #374151;
+        }
+
+        .allow-all-notice {
+            background: #f0f9ff;
+            border: 1px solid #0ea5e9;
+            border-radius: 6px;
+            padding: 12px;
+            margin-top: 12px;
+        }
+
+        .allow-all-notice p {
+            margin: 0;
+            color: #0c4a6e;
+            font-size: 14px;
+        }
+
+        .email-management {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid #e5e7eb;
+        }
+
+        .email-input-group {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .email-input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .email-input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .add-email-button {
+            padding: 8px 16px;
+            background: #10b981;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .add-email-button:hover:not(:disabled) {
+            background: #059669;
+        }
+
+        .add-email-button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        .emails-list {
+            margin-top: 8px;
+        }
+
+        .email-items {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .email-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 12px;
+            background: white;
+            border: 1px solid #e1e5e9;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .email-address {
+            font-family: monospace;
+            color: #374151;
+        }
+
+        .remove-email-button {
+            background: none;
+            border: none;
+            color: #ef4444;
+            font-size: 16px;
+            cursor: pointer;
+            padding: 0;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+
+        .remove-email-button:hover {
+            background: #fee2e2;
+        }
+
+        .no-emails {
+            text-align: center;
+            padding: 12px;
+            color: #9ca3af;
+            font-size: 13px;
+            font-style: italic;
+        }
+
+        .no-emails p {
+            margin: 0;
+        }
+
+        .domain-name {
+            font-family: monospace;
+            font-size: 14px;
+        }
+
+        .remove-button {
+            background: none;
+            border: none;
+            color: #ef4444;
+            font-size: 18px;
+            cursor: pointer;
+            padding: 0;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+
+        .remove-button:hover {
+            background: #fee2e2;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 20px;
+            color: #6b7280;
+            font-style: italic;
+        }
+
+        .actions {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+            padding-top: 20px;
+            border-top: 1px solid #e1e5e9;
+        }
+
+        .save-button {
+            padding: 10px 20px;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .save-button:hover:not(:disabled) {
+            background: #2563eb;
+        }
+
+        .save-button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        .cancel-button {
+            padding: 10px 20px;
+            background: white;
+            color: #6b7280;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .cancel-button:hover {
+            background: #f9fafb;
+            border-color: #9ca3af;
+        }
+    </style>
+</body>
+</html>
